@@ -1,0 +1,174 @@
+using Life;
+using Life.Network;
+using Life.UI;
+using UnityEngine;
+using System.Collections.Generic;
+
+namespace PoliceAmboise
+{
+    public class PoliceAmboiseModKit : Plugin
+    {
+        // ===== DONNÉES =====
+        private Dictionary<int, string> grades = new Dictionary<int, string>();
+        private Dictionary<int, List<string>> casiers = new Dictionary<int, List<string>>();
+        private Dictionary<int, float> panicCooldown = new Dictionary<int, float>();
+        private const float PANIC_CD = 30f;
+
+        private Vector3 commissariatPos = new Vector3(123f, 0f, 456f);
+        private float commissariatRadius = 5f;
+
+        public PoliceAmboiseModKit(IGameAPI api) : base(api) { }
+
+        public override void OnPluginInit()
+        {
+            base.OnPluginInit();
+            Debug.Log("[Police Amboise] ModKit prêt 🚓");
+        }
+
+        public override void OnPlayerInput(Player player, KeyCode key, bool onUI)
+        {
+            if (onUI) return;
+
+            if (key == KeyCode.F11 && IsPolice(player))
+                OpenMenu(player);
+
+            if (key == KeyCode.F10 && IsPolice(player))
+                Panic(player);
+        }
+
+        public override void OnPlayerTick(Player player)
+        {
+            if (Vector3.Distance(player.transform.position, commissariatPos) < commissariatRadius)
+            {
+                player.SendText("📍 Commissariat - F11 pour menu police");
+            }
+        }
+
+        // ================= MENUS =================
+        private void OpenMenu(Player player)
+        {
+            UIPanel panel = new UIPanel("PoliceMenu", UIPanel.PanelType.Text);
+
+            // Titre Belgique + Nom du joueur + Grade
+            panel.SetTitle(
+                "<color=#000000>🚓 POLICE</color> " +
+                "<color=#FFD700>AMBOISE</color>\n" +
+                "<color=#FF0000>" + player.FullName + " | " + GetGrade(player) + "</color>"
+            );
+
+            panel.Text =
+                "<color=#FFD700>Menu Police</color>\n\n" +
+                "Grade : <color=#FFFFFF>" + GetGrade(player) + "</color>";
+
+            panel.AddButton("📻 Radio police", ui => RadioMenu(player));
+            panel.AddButton("📜 Casier judiciaire", ui => CasierMenu(player));
+            panel.AddButton("👮 Service", ui => Service(player));
+            panel.AddButton("❌ Fermer", ui => player.ClosePanel(ui));
+
+            player.ShowPanelUI(panel);
+        }
+
+        private void RadioMenu(Player player)
+        {
+            UIPanel panel = new UIPanel("Radio", UIPanel.PanelType.Text);
+            panel.SetTitle("📻 Radio Police");
+
+            panel.Text = "Messages internes police";
+
+            panel.AddButton("🚨 Intervention urgente", ui =>
+            {
+                BroadcastPolice("🚨 Intervention urgente demandée !");
+            });
+
+            panel.AddButton("📍 Contrôle en cours", ui =>
+            {
+                BroadcastPolice("📍 Contrôle en cours par " + player.FullName);
+            });
+
+            panel.AddButton("⬅ Retour", ui => OpenMenu(player));
+
+            player.ShowPanelUI(panel);
+        }
+
+        private void CasierMenu(Player player)
+        {
+            Player target = player.GetClosestPlayer();
+            if (target == null)
+            {
+                player.Notify("Police", "Aucun citoyen proche");
+                return;
+            }
+
+            if (!casiers.ContainsKey(target.Id))
+                casiers[target.Id] = new List<string>();
+
+            UIPanel panel = new UIPanel("Casier", UIPanel.PanelType.Text);
+            panel.SetTitle("📜 Casier judiciaire");
+
+            panel.Text = $"Citoyen : {target.FullName}\n\nInfractions :\n";
+            foreach (string s in casiers[target.Id])
+                panel.Text += "- " + s + "\n";
+
+            panel.AddButton("➕ Ajouter infraction", ui =>
+            {
+                casiers[target.Id].Add("Infraction RP");
+                player.Notify("Police", "Infraction ajoutée");
+            });
+
+            panel.AddButton("⬅ Retour", ui => OpenMenu(player));
+            player.ShowPanelUI(panel);
+        }
+
+        // ================= LOGIQUE =================
+        private void Service(Player player)
+        {
+            player.SetAdminService(true);
+            player.Notify("Police", "Vous êtes en service 👮");
+        }
+
+        private void Panic(Player player)
+        {
+            if (panicCooldown.ContainsKey(player.Id) &&
+                Time.time - panicCooldown[player.Id] < PANIC_CD)
+            {
+                player.Notify("PANIC", "Cooldown actif ⏱️");
+                return;
+            }
+
+            panicCooldown[player.Id] = Time.time;
+
+            BroadcastPolice(
+                $"🚨 PANIC déclenché par {player.FullName}\n📍 Position connue"
+            );
+
+            player.PlaySound("panic");
+        }
+
+        private void BroadcastPolice(string msg)
+        {
+            foreach (Player p in LifeServer.Instance.Players)
+            {
+                if (IsPolice(p))
+                {
+                    p.Notify("📻 Radio Police", msg);
+                    p.PlaySound("radio");
+                }
+            }
+        }
+
+        // ================= GRADES =================
+        private string GetGrade(Player player)
+        {
+            if (!grades.ContainsKey(player.Id))
+                grades[player.Id] = "Agent";
+
+            return grades[player.Id];
+        }
+
+        // ================= UTILS =================
+        private bool IsPolice(Player p)
+        {
+            return p.Job != null && p.Job.Name == "Police";
+        }
+    }
+}
